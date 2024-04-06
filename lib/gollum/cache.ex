@@ -15,12 +15,16 @@ defmodule Gollum.Cache do
   # 3. options
 
   # Default values for options
-  @name         Gollum.Cache
+  @name Gollum.Cache
   @refresh_secs 86_400
   @lazy_refresh false
-  @async        false
-  @force        false
-  @fetcher      Gollum.Fetcher
+  @async false
+  @force false
+  @fetcher Gollum.Fetcher
+
+  def init(opts) do
+    {:ok, opts}
+  end
 
   @doc """
   Starts up the cache.
@@ -66,7 +70,7 @@ defmodule Gollum.Cache do
   """
   @spec fetch(binary, keyword) :: :ok | {:error, term}
   def fetch(host, opts \\ []) when is_binary(host) do
-    name  = opts[:name] || @name
+    name = opts[:name] || @name
     async = opts[:async] || @async
 
     # Cast if async, else call
@@ -85,9 +89,9 @@ defmodule Gollum.Cache do
 
     * `name` - The name of the GenServer. Default value is `Gollum.Cache`.
   """
-  @spec get(binary, keyword) :: Gollum.Host.t | nil
+  @spec get(binary, keyword) :: Gollum.Host.t() | nil
   def get(host, opts \\ []) do
-    name  = opts[:name] || @name
+    name = opts[:name] || @name
     GenServer.call(name, {:get, host}, :infinity)
   end
 
@@ -104,12 +108,14 @@ defmodule Gollum.Cache do
     new_store = Map.put(store, host, {host_struct, cur_time})
     {:noreply, {new_store, new_pending, opts}}
   end
+
   def handle_info({:fetched, host, {:error, reason}}, {store, pending, opts}) do
     # Reply :error to all waiting processes
     Enum.each(pending[host], &GenServer.reply(&1, {:error, reason}))
     new_pending = Map.delete(pending, host)
     {:noreply, {store, new_pending, opts}}
   end
+
   def handle_info({:refresh, host}, {store, pending, opts}) do
     GenServer.cast(self(), {:fetch, host, from_refresh: true, async: true})
     Process.send_after(self(), {:refresh, host}, opts[:refresh_secs] * 1_000)
@@ -119,13 +125,14 @@ defmodule Gollum.Cache do
   @doc false
   def handle_call({:fetch, host, fetch_opts}, from, {store, pending, opts}) do
     case pending[host] do
-      nil   -> do_possible_fetch({host, [{:from, from} | fetch_opts]}, {store, pending, opts})
+      nil -> do_possible_fetch({host, [{:from, from} | fetch_opts]}, {store, pending, opts})
       froms -> {:noreply, {store, %{pending | host => [from | froms]}, opts}}
     end
   end
+
   def handle_call({:get, host}, _from, {store, _pending, _opts} = state) do
     case store[host] do
-      nil       -> {:reply, nil, state}
+      nil -> {:reply, nil, state}
       {data, _} -> {:reply, data, state}
     end
   end
@@ -133,7 +140,7 @@ defmodule Gollum.Cache do
   @doc false
   def handle_cast({:fetch, host, fetch_opts}, {store, pending, opts}) do
     case pending[host] do
-      nil    -> do_possible_fetch({host, fetch_opts}, {store, pending, opts})
+      nil -> do_possible_fetch({host, fetch_opts}, {store, pending, opts})
       _froms -> {:noreply, {store, pending, opts}}
     end
   end
@@ -141,19 +148,26 @@ defmodule Gollum.Cache do
   # Performs the fetch after checking the criteria.
   defp do_possible_fetch({host, fetch_opts}, {store, pending, opts}) do
     cur_time = :erlang.system_time(:seconds)
-    with {:force, false}          <- {:force, fetch_opts[:force] || @force},
+
+    with {:force, false} <- {:force, fetch_opts[:force] || @force},
          {:exists, {_data, time}} <- {:exists, store[host]},
-         {:lazy_refresh, true}    <- {:lazy_refresh, opts[:lazy_refresh] || @lazy_refresh},
-         refresh_secs             = opts[:refresh_secs] || @refresh_secs,
-         {:refresh_secs, true}    <- {:refresh_secs, cur_time - time > refresh_secs}
-    do
+         {:lazy_refresh, true} <- {:lazy_refresh, opts[:lazy_refresh] || @lazy_refresh},
+         refresh_secs = opts[:refresh_secs] || @refresh_secs,
+         {:refresh_secs, true} <- {:refresh_secs, cur_time - time > refresh_secs} do
       do_fetch({host, fetch_opts}, {store, pending, opts})
     else
-      {:force, true} -> do_fetch({host, fetch_opts}, {store, pending, opts})
-      {:exists, nil} -> do_fetch({host, fetch_opts}, {store, pending, opts})
-      {:refresh_secs, false} -> reply_if_sync(fetch_opts, {store, pending, opts})
+      {:force, true} ->
+        do_fetch({host, fetch_opts}, {store, pending, opts})
+
+      {:exists, nil} ->
+        do_fetch({host, fetch_opts}, {store, pending, opts})
+
+      {:refresh_secs, false} ->
+        reply_if_sync(fetch_opts, {store, pending, opts})
+
       {:lazy_refresh, false} ->
         from_refresh = fetch_opts[:from_refresh] || false
+
         if from_refresh do
           do_fetch({host, fetch_opts}, {store, pending, opts})
         else
@@ -184,15 +198,17 @@ defmodule Gollum.Cache do
     pid = self()
     # Get the fetcher from the env
     fetcher = opts[:fetcher] || @fetcher
-    spawn(fn->
+
+    spawn(fn ->
       response = fetcher.fetch(host, Keyword.merge(fetch_opts, opts))
       send(pid, {:fetched, host, response})
     end)
 
     # Start the non-lazy refresh cycle if opts says so
     from_refresh = fetch_opts[:from_refresh] || false
-    lazy_refresh = opts[:lazy_refresh]       || @lazy_refresh
-    refresh_secs = opts[:refresh_secs]       || @refresh_secs
+    lazy_refresh = opts[:lazy_refresh] || @lazy_refresh
+    refresh_secs = opts[:refresh_secs] || @refresh_secs
+
     if !from_refresh && !lazy_refresh do
       Process.send_after(self(), {:refresh, host}, refresh_secs * 1_000)
     end
