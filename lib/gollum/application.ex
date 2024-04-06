@@ -5,20 +5,18 @@ defmodule Gollum.Application do
 
   def opts do
     [
-      name:         Application.get_env(:gollum, :name),
+      name: Application.get_env(:gollum, :name),
       refresh_secs: Application.get_env(:gollum, :refresh_secs),
       lazy_refresh: Application.get_env(:gollum, :lazy_refresh),
-      user_agent:   Application.get_env(:gollum, :user_agent),
+      user_agent: Application.get_env(:gollum, :user_agent)
     ]
   end
 
   def start(_type, _args) do
-    import Supervisor.Spec
-
     children = [
-      worker(Gollum.Cache, [opts()]),
+      {Gollum.Cache, opts()}
     ]
-    opts = [strategy: :one_for_one, name: Gollum.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    Supervisor.start_link(children, strategy: :one_for_one, name: Gollum.Supervisor)
   end
 end
