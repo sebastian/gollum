@@ -20,7 +20,7 @@ defmodule Gollum.Host do
   %Gollum.Host{host: "hello.net", rules: %{"Hello" => %{allowed: [], disallowed: []}}}
   ```
   """
-  @spec new(binary, map) :: Gollum.Host.t
+  @spec new(binary, map) :: Gollum.Host.t()
   def new(host, rules) do
     %Gollum.Host{host: host, rules: rules}
   end
@@ -55,10 +55,10 @@ defmodule Gollum.Host do
   iex> Host.crawlable?(host, "OtherHello", "/page.htm")
   :uncrawlable
   iex> Host.crawlable?(host, "NotHello", "/page.htm")
-  :undefined
+  :uncrawlable
   ```
   """
-  @spec crawlable?(Gollum.Host.t, binary, binary) :: :crawlable | :uncrawlable | :undefined
+  @spec crawlable?(Gollum.Host.t(), binary, binary) :: :crawlable | :uncrawlable | :undefined
   def crawlable?(%Gollum.Host{rules: rules}, user_agent, path) do
     # Determine the user agent
     key =
@@ -86,7 +86,9 @@ defmodule Gollum.Host do
   defp sanitize_user_agent_map(nil), do: %{allowed: [], disallowed: []}
   defp sanitize_user_agent_map(%{allowed: _, disallowed: _} = map), do: map
   defp sanitize_user_agent_map(%{allowed: allowed}), do: %{allowed: allowed, disallowed: []}
-  defp sanitize_user_agent_map(%{disallowed: disallowed}), do: %{allowed: [], disallowed: disallowed}
+
+  defp sanitize_user_agent_map(%{disallowed: disallowed}),
+    do: %{allowed: [], disallowed: disallowed}
 
   @doc false
   # Returns the most suitable user agent string from the specified list, based
@@ -94,6 +96,7 @@ defmodule Gollum.Host do
   # are case insensitive.
   def which_agent(agents, agent) when is_binary(agent) do
     agent = String.downcase(agent)
+
     agents
     |> Enum.map(&String.downcase/1)
     |> Enum.filter(&match_agent?(agent, &1))
@@ -111,13 +114,14 @@ defmodule Gollum.Host do
   # Returns whether a path is allowed to be accessed.
   # Return value is :allowed, :disallowed or :undefined
   def allowed?(%{allowed: allowed, disallowed: disallowed}, path) do
+    [path | _] = String.split(URI.encode(URI.decode(path)), "#")
     allowed = Enum.filter(allowed, &match_path?(path, &1))
     disallowed = Enum.filter(disallowed, &match_path?(path, &1))
 
     # Check for empty array before finding max
     cond do
-      length(disallowed) == 0 -> :allowed
-      length(allowed)    == 0 -> :disallowed
+      Enum.empty?(disallowed) -> :allowed
+      Enum.empty?(allowed) -> :disallowed
       true -> do_allowed(allowed, disallowed)
     end
   end
@@ -129,14 +133,11 @@ defmodule Gollum.Host do
     max_disallowed = Enum.max_by(disallowed, &String.length/1)
     max_allowed_length = String.length(max_allowed)
     max_disallowed_length = String.length(max_disallowed)
-    contains_wildcard = &String.contains?(&1, "*")
 
-    # Check for wildcards
     cond do
-      contains_wildcard.(max_allowed) || contains_wildcard.(max_disallowed) -> :undefined
-      max_allowed_length == max_disallowed_length                           -> :undefined
-      max_allowed_length > max_disallowed_length                            -> :allowed
-      max_allowed_length < max_disallowed_length                            -> :disallowed
+      max_allowed_length > max_disallowed_length -> :allowed
+      max_allowed_length < max_disallowed_length -> :disallowed
+      true -> :undefined
     end
   end
 
@@ -152,6 +153,7 @@ defmodule Gollum.Host do
   # Does the actual path matching
   defp do_match_path(_, []), do: true
   defp do_match_path("", _), do: false
+
   defp do_match_path(lhs, [group | rest]) do
     case do_match_group(lhs, group) do
       {:ok, remaining} -> do_match_path(remaining, rest)
@@ -165,18 +167,14 @@ defmodule Gollum.Host do
   # e.g. {:ok, "llo"} = do_match_group("yohello", "helloo")
   # e.g. :error = do_match_group("hello", "helloo")
   # e.g. :error = do_match_group("hello", "he$")
-  defp do_match_group("", ""), do:
-    {:ok, ""}
-  defp do_match_group("", "$" <> _rhs), do:
-    {:ok, ""}
-  defp do_match_group(_lhs, "$" <> _rhs), do:
-    :error
-  defp do_match_group("", _rhs), do:
-    :error
-  defp do_match_group(lhs, ""), do:
-    {:ok, lhs}
-  defp do_match_group(<<ch::utf8, lhs::binary>>, <<ch::utf8, rhs::binary>>), do:
-    do_match_group(lhs, rhs)
-  defp do_match_group(<<_ch::utf8, lhs::binary>>, rhs), do:
-    do_match_group(lhs, rhs)
+  defp do_match_group("", ""), do: {:ok, ""}
+  defp do_match_group("", "$" <> _rhs), do: {:ok, ""}
+  defp do_match_group(_lhs, "$" <> _rhs), do: :error
+  defp do_match_group("", _rhs), do: :error
+  defp do_match_group(lhs, ""), do: {:ok, lhs}
+
+  defp do_match_group(<<ch::utf8, lhs::binary>>, <<ch::utf8, rhs::binary>>),
+    do: do_match_group(lhs, rhs)
+
+  defp do_match_group(<<_ch::utf8, lhs::binary>>, rhs), do: do_match_group(lhs, rhs)
 end
