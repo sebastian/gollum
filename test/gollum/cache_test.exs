@@ -3,7 +3,7 @@ defmodule Gollum.CacheTest do
   alias Gollum.Cache
 
   setup do
-    Cache.start_link(name: TestCache, fetcher: MockFetcher)
+    {:ok, _} = Cache.start_link(name: TestCache, fetcher: MockFetcher)
     :ok
   end
 
