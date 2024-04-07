@@ -90,9 +90,14 @@ defmodule Gollum.Parser do
       agents,
       accum,
       &Map.update(&2, &1, rules, fn existing_rules ->
+        existing_allowed = existing_rules[:allowed] || []
+        existing_disallowed = existing_rules[:disallowed] || []
+        allowed = rules[:allowed] || []
+        disallowed = rules[:disallowed] || []
+
         %{
-          allowed: Enum.uniq(existing_rules.allowed ++ rules.allowed),
-          disallowed: Enum.uniq(existing_rules.disallowed ++ rules.disallowed)
+          allowed: Enum.uniq(existing_allowed ++ allowed),
+          disallowed: Enum.uniq(existing_disallowed ++ disallowed)
         }
       end)
     )
