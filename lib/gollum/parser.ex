@@ -34,8 +34,8 @@ defmodule Gollum.Parser do
   # Tokenize a single line of the robots.txt.
   defp tokenize(line) do
     cond do
-      result = Regex.run(~r/^allow:?\s(.+)$/i,      line) -> {:allow,      Enum.at(result, 1)}
-      result = Regex.run(~r/^disallow:?\s(.+)$/i,   line) -> {:disallow,   Enum.at(result, 1)}
+      result = Regex.run(~r/^allow:?\s(.+)$/i, line) -> {:allow, Enum.at(result, 1)}
+      result = Regex.run(~r/^disallow:?\s(.+)$/i, line) -> {:disallow, Enum.at(result, 1)}
       result = Regex.run(~r/^user-agent:?\s(.+)$/i, line) -> {:user_agent, Enum.at(result, 1)}
       true -> :unknown
     end
@@ -49,27 +49,57 @@ defmodule Gollum.Parser do
   defp do_parse([{:user_agent, agent} | tokens], {agents, nil}, accum) do
     do_parse(tokens, {[String.downcase(agent) | agents], nil}, accum)
   end
+
+  # Finished parsing a set of rules without user agent, so add them to group *
+  defp do_parse([{:user_agent, agent} | tokens], {[], rules}, accum) do
+    do_parse([{:user_agent, agent} | tokens], {["*"], rules}, accum)
+  end
+
   # Finished parsing a set of rules, add rules to accum and reset rules to nil
   defp do_parse([{:user_agent, agent} | tokens], {agents, rules}, accum) do
-    accum = Enum.reduce(agents, accum, &Map.put(&2, &1, rules))
-    do_parse(tokens, {[agent], nil}, accum)
+    accum = add_to_accum(agents, accum, rules)
+    do_parse(tokens, {[String.downcase(agent)], nil}, accum)
   end
+
   # Add an allowed field
   defp do_parse([{:allow, path} | tokens], {agents, rules}, accum) do
+    [path | _] = String.split(URI.encode(URI.decode(path)), "#")
     rules = Map.put(rules || %{}, :allowed, [path | rules[:allowed] || []])
     do_parse(tokens, {agents, rules}, accum)
   end
+
   # Add a disallowed field
   defp do_parse([{:disallow, path} | tokens], {agents, rules}, accum) do
+    [path | _] = String.split(URI.encode(URI.decode(path)), "#")
     rules = Map.put(rules || %{}, :disallowed, [path | rules[:disallowed] || []])
     do_parse(tokens, {agents, rules}, accum)
   end
+
   # End the parsing, current buffer has nothing, so just return the accumulator
   defp do_parse([], {_agents, nil}, accum) do
     accum
   end
+
   # End the parsing, and add the current buffer to the accumulator
   defp do_parse([], {agents, rules}, accum) do
-    Enum.reduce(agents, accum, &Map.put(&2, &1, rules))
+    add_to_accum(agents, accum, rules)
+  end
+
+  defp add_to_accum(agents, accum, rules) do
+    Enum.reduce(
+      agents,
+      accum,
+      &Map.update(&2, &1, rules, fn existing_rules ->
+        existing_allowed = existing_rules[:allowed] || []
+        existing_disallowed = existing_rules[:disallowed] || []
+        allowed = rules[:allowed] || []
+        disallowed = rules[:disallowed] || []
+
+        %{
+          allowed: Enum.uniq(existing_allowed ++ allowed),
+          disallowed: Enum.uniq(existing_disallowed ++ disallowed)
+        }
+      end)
+    )
   end
 end
