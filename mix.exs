@@ -27,7 +27,7 @@ defmodule Gollum.Mixfile do
   defp deps do
     [
       {:httpoison, "~> 2.2"},
-      {:ex_doc, "~> 0.17.1", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.19", only: :dev, runtime: false}
     ]
   end
 
